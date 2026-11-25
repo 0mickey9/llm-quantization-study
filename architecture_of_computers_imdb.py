@@ -1,4 +1,6 @@
 import pandas as pd
+
+
 # print(pd.__version__)
 #
 # data = pd.read_csv(r'C:\Users\Admin\OneDrive\Desktop\for school\Architecture of computers\Projects\data\raw\IMDB Dataset.csv')
@@ -39,6 +41,37 @@ import pandas as pd
 #     saved_data.reset_index(drop = True)
 #  )
 # )
+with_matrix = pd.read_csv("data/processed/imdb_q4_k_m_imdb_pilot_predictions.csv")
+without_matrix = pd.read_csv("data/processed/imdb_q4_k_m_no_imatrix_predictions.csv")
+
+assert with_matrix["row_id"].equals(without_matrix["row_id"])
+assert with_matrix["actual_label"].equals(without_matrix["actual_label"])
+
+differences = with_matrix["predicted_label"].ne(without_matrix["predicted_label"])
+print("Different predictions:", differences.sum())
+
+
+from pathlib import Path
+import requests
+
+text_path = Path(__file__).resolve().parent / "data/processed/calibration_imdb_pilot.txt"
+text = text_path.read_text(encoding = 'utf-8')
+
+response = requests.post(
+    "http://127.0.0.1:8080/tokenize",
+    json = {"content" : text,
+            "add_specials" : False,
+            "parse_specials" : False,
+            },
+    timeout = 60,
+)
+response.raise_for_status()
+
+tokens = response.json()['tokens']
+print("Calibrations tokens : ", len(tokens))
+
+raise SystemExit
+
 
 train = pd.read_parquet("data/raw/train-00000-of-00001.parquet")
 test = pd.read_parquet("data/raw/test-00000-of-00001.parquet")
@@ -64,7 +97,10 @@ calibration_pool = calibration_pool[~calibration_pool['text'].duplicated()].copy
 print(calibration_pool.shape)
 print(calibration_pool["text"].duplicated().sum())
 
-pilot_test = calibration_pool.groupby('label').sample(n = 100, random_state = 42)
+calibration_reviews = calibration_pool.sample(n = 100, random_state= 42)
+calibration_text = "\n\n".join(calibration_reviews.text)
+
+pilot_test = test.groupby('label').sample(n = 100, random_state = 42)
 print(pilot_test.shape)
 print(pilot_test.value_counts('label', dropna = False), '\n')
 
@@ -130,10 +166,34 @@ for i in range(len(ok)):
 print(len(results))
 
 result = pd.DataFrame(results)
-result.to_csv("data/processed/pilot_test_predictions.csv", index = False)
+result.to_csv(
+    "data/processed/imdb_q4_k_m_no_imatrix_predictions.csv",
+    index=False,
+)
 print(result.shape)
 
+
+
+
+predicted_ids = result["predicted_label"].map({"NEGATIVE" : 0, "POSITIVE" : 1})
+correct = predicted_ids.eq(result["actual_label"]).fillna(False)
+print("Correct / total:", correct.sum(), "/", len(result))
+print("Accuracy:", f"{correct.mean():.2%}")
+print("Unrecognized labels:", predicted_ids.isna().sum())
+
+from pathlib import Path
+
+calibration_path = (
+    Path(__file__).resolve().parent
+    / "data/processed/calibration_imdb_pilot.txt"
+)
+calibration_path.write_text(calibration_text, encoding = "utf-8")
+
+print("Saved to : " , calibration_path)
 raise SystemExit
+
+
+
 from pathlib import Path
 import subprocess
 llama_dir = Path(r"C:\Users\Admin\llama.cpp")
